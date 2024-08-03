@@ -1,5 +1,6 @@
 import os
-os.environ['LD_LIBRARY_PATH'] = 'YOUR_CONDA_ENV/lib'
+# os.environ['LD_LIBRARY_PATH'] = 'YOUR_CONDA_ENV/lib'
+os.environ['LD_LIBRARY_PATH'] = '/data/guoxinsen/miniconda3/envs/G4S/lib'
 import sys
 from typing import List
 
@@ -20,17 +21,18 @@ from peft import (  # noqa: E402
     LoraConfig,
     get_peft_model,
     get_peft_model_state_dict,
-    prepare_model_for_int8_training,
+    # prepare_model_for_int8_training,
+    prepare_model_for_kbit_training,
     set_peft_model_state_dict,
 )
-from transformers import LlamaForCausalLM, LlamaTokenizer  # noqa: F402
-
+# from transformers import LlamaForCausalLM, LlamaTokenizer  # noqa: F402
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 def train(
     # model/data params
-    base_model: str = "",  # the only required argument
-    train_data_path: List[str] = [""],
-    val_data_path: List[str] = [""],
+    base_model: str = "/data/guoxinsen/Grounding4Rec/Qwen1.5-1.8B",  # the only required argument
+    train_data_path: List[str] = ["/data/guoxinsen/Grounding4Rec/data/books/train.json"],
+    val_data_path: List[str] = ["/data/guoxinsen/Grounding4Rec/data/books/valid.json"],
     output_dir: str = "./lora-alpaca",
     sample: int = -1,
     seed: int = 0,
@@ -52,10 +54,10 @@ def train(
     train_on_inputs: bool = True,  # if False, masks out inputs in loss
     group_by_length: bool = False,  # faster, but produces an odd training loss curve
     # wandb params
-    wandb_project: str = "",
-    wandb_run_name: str = "",
-    wandb_watch: str = "",  # options: false | gradients | all
-    wandb_log_model: str = "",  # options: false | true
+    wandb_project: str = "train_by_books",
+    wandb_run_name: str = "test_code",
+    wandb_watch: str = "all",  # options: false | gradients | all
+    wandb_log_model: str = "true",  # options: false | true
     resume_from_checkpoint: str = None,  # either training checkpoint or final adapter
 
 ):
@@ -109,14 +111,14 @@ def train(
     if len(wandb_log_model) > 0:
         os.environ["WANDB_LOG_MODEL"] = wandb_log_model
     os.environ["WANDB_DISABLED"] = "true"
-    model = LlamaForCausalLM.from_pretrained(
+    model = AutoModelForCausalLM.from_pretrained(
         base_model,
         load_in_8bit=True,
         torch_dtype=torch.float16,
         device_map=device_map,
     )
     # model.set_tau(tau)
-    tokenizer = LlamaTokenizer.from_pretrained(base_model)
+    tokenizer = AutoTokenizer.from_pretrained(base_model)
 
     tokenizer.pad_token_id = (
         0  # unk. we want this to be different from the eos token
@@ -160,7 +162,10 @@ def train(
             ]  # could be sped up, probably
         return tokenized_full_prompt
 
-    model = prepare_model_for_int8_training(model)
+    # model = prepare_model_for_int8_training(model)
+    model = prepare_model_for_kbit_training(model)
+    # print("Model state before loading adapters:", model.state_dict().keys())
+    # print("--------------------------------------------------------")
 
     config = LoraConfig(
         r=lora_r,
@@ -259,15 +264,15 @@ def train(
     )
     model.config.use_cache = False
 
-    old_state_dict = model.state_dict
-    model.state_dict = (
-        lambda self, *_, **__: get_peft_model_state_dict(
-            self, old_state_dict()
-        )
-    ).__get__(model, type(model))
+    # old_state_dict = model.state_dict
+    # model.state_dict = (
+    #     lambda self, *_, **__: get_peft_model_state_dict(
+    #         self, old_state_dict()
+    #     )
+    # ).__get__(model, type(model))
 
-    if torch.__version__ >= "2" and sys.platform != "win32":
-        model = torch.compile(model)
+    # if torch.__version__ >= "2" and sys.platform != "win32":
+    #     model = torch.compile(model)
 
     trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
